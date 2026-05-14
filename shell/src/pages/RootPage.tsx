@@ -49,7 +49,13 @@ export const RootPage = () => {
           AGPL-3.0-or-later
         </a>
         {" · "}
-        <span>Source</span>
+        <a
+          href="https://github.com/alexanderpel/docx-toolkit"
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          Source
+        </a>
       </footer>
     </div>
   );

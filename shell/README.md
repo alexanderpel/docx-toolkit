@@ -54,4 +54,4 @@ The shell never reads from `localStorage`/`sessionStorage` belonging to the pare
 
 ## Source
 
-The full source for this application is at `<TODO: insert public Git URL after first push>`. AGPL §13 disclosure.
+The full source for this application is at <https://github.com/alexanderpel/docx-toolkit>. AGPL §13 disclosure.

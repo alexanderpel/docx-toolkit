@@ -49,7 +49,7 @@ app.get("/", (_req, res) => {
   res.json({
     name: "docx-converter",
     license: "AGPL-3.0-or-later",
-    source: "<TODO: insert public Git URL after first push>",
+    source: "https://github.com/alexanderpel/docx-toolkit",
     description: "POST /convert with { base64Raw: string } to receive ProseMirror JSON.",
   });
 });
