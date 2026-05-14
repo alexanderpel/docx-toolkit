@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SuperDoc } from "superdoc";
 import "superdoc/style.css";
 
 import { USER_PRESENCE_COLORS } from "@/constants/userPresenceColors";
 import { createDocxHeadingShortcuts } from "@/editor/docxHeadingShortcuts";
 import { useDocxEditorProvider, type CollabConfig } from "@/hooks/useDocxEditorProvider";
-
-import { DocxOutlineNavigator } from "./DocxOutlineNavigator";
 
 import type { AwarenessUser, ShellMode, ShellUser } from "@/bridge/types";
 
@@ -25,6 +23,10 @@ export type DocxShellProps = {
   fetchDownloadMeta: () => Promise<{ url: string | null; seededAt: number | null } | null>;
   onAwareness?: (users: AwarenessUser[]) => void;
   onError?: (code: string, message: string) => void;
+  /** Fired once per documentId after the editor has rendered AND the
+   *  fit-to-width zoom has been applied. Hosts can use this to dismiss a
+   *  loading skeleton so the user never sees the intermediate flicker. */
+  onFirstPaint?: () => void;
 };
 
 const deriveActiveUsers = (
@@ -64,6 +66,7 @@ export const DocxShell = ({
   fetchDownloadMeta,
   onAwareness,
   onError,
+  onFirstPaint,
 }: DocxShellProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const superdocRef = useRef<SuperDoc | null>(null);
@@ -72,7 +75,15 @@ export const DocxShell = ({
   const isSavingRef = useRef(false);
   const seededRef = useRef(false);
 
-  const [activeEditor, setActiveEditor] = useState<any | null>(null);
+  const [zoom, setZoom] = useState(100);
+  const ZOOM_MIN = 50;
+  const ZOOM_MAX = 200;
+  const ZOOM_STEP = 10;
+  const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(z)));
+  // Track whether we've already auto-fit the current doc, so user zoom
+  // changes aren't overwritten by re-renders.
+  const hasFitToWidthRef = useRef<string | null>(null);
+  const firstPaintFiredRef = useRef<string | null>(null);
 
   const { provider, doc, isInitialized, isError } = useDocxEditorProvider({
     documentId,
@@ -204,7 +215,6 @@ export const DocxShell = ({
         },
         onEditorCreate: (editor: any) => {
           editorRef.current = editor;
-          setActiveEditor(editor);
         },
         onEditorUpdate: () => scheduleSave(),
         onReady: () => {
@@ -237,7 +247,6 @@ export const DocxShell = ({
       instance?.destroy?.();
       superdocRef.current = null;
       editorRef.current = null;
-      setActiveEditor(null);
     };
   }, [
     isInitialized,
@@ -254,6 +263,81 @@ export const DocxShell = ({
     onAwareness,
   ]);
 
+  // Push zoom changes into SuperDoc. The instance exposes setZoom(percent)
+  // and updates all pages reactively. We re-apply on (zoom, ready) so the
+  // value sticks across re-mounts.
+  useEffect(() => {
+    const instance = superdocRef.current as any;
+    if (!instance || typeof instance.setZoom !== "function") return;
+    try {
+      instance.setZoom(zoom);
+    } catch (err) {
+      console.error("[DocxShell] setZoom failed:", err);
+    }
+  }, [zoom, isInitialized]);
+
+  // Pre-compute the fit-to-width zoom SYNCHRONOUSLY before SuperDoc
+  // mounts, so the first render uses the right zoom — no measure-then-
+  // jump cycle. We assume standard US Letter at 96 DPI (816px). A4
+  // (794px) and landscape (1056px) will be slightly off but render
+  // without visible flicker (skeleton hides the bootstrap entirely),
+  // and the user can adjust with the zoom widget. Doing this in a
+  // useLayoutEffect (not useEffect) means it commits BEFORE the
+  // SuperDoc-creation useEffect runs, so SuperDoc starts at target
+  // zoom rather than 100%.
+  useLayoutEffect(() => {
+    if (hasFitToWidthRef.current === documentId) return;
+    const canvas = containerRef.current;
+    if (!canvas) return;
+    const canvasWidth = canvas.clientWidth;
+    if (canvasWidth <= 0) return;
+    const availableWidth = Math.max(canvasWidth - 64, 0);
+    const target = clampZoom(Math.floor((availableWidth / 816) * 100));
+    hasFitToWidthRef.current = documentId;
+    setZoom(target);
+  }, [documentId]);
+
+  // Fire first-paint once SuperDoc is initialized + zoom is committed.
+  // Two animation frames give Vue/SuperDoc time to flush its reactive
+  // render — fast enough to feel instant, slow enough to never reveal
+  // an intermediate state.
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (firstPaintFiredRef.current === documentId) return;
+    if (hasFitToWidthRef.current !== documentId) return;
+    let raf2: number | null = null;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        firstPaintFiredRef.current = documentId;
+        onFirstPaint?.();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2 !== null) cancelAnimationFrame(raf2);
+    };
+  }, [isInitialized, documentId, zoom, onFirstPaint]);
+
+  // Keyboard shortcuts: Cmd/Ctrl + = / − / 0. Bound on window so they fire
+  // anywhere inside the iframe, not just when the editor has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        setZoom((z) => clampZoom(z + ZOOM_STEP));
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        setZoom((z) => clampZoom(z - ZOOM_STEP));
+      } else if (e.key === "0") {
+        e.preventDefault();
+        setZoom(100);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (isError) {
     return <div className="docx-shell-error">Failed to connect to the document.</div>;
   }
@@ -262,11 +346,32 @@ export const DocxShell = ({
     <div className="docx-shell">
       <div className="docx-shell-body">
         <div ref={containerRef} className="docx-shell-canvas" />
-        {mode === "edit" ? (
-          <aside className="docx-shell-outline">
-            <DocxOutlineNavigator editor={activeEditor} />
-          </aside>
-        ) : null}
+      </div>
+      <div className="docx-shell-zoom" role="group" aria-label="Zoom controls">
+        <button
+          type="button"
+          onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
+          disabled={zoom <= ZOOM_MIN}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          className="docx-shell-zoom-reset"
+          onClick={() => setZoom(100)}
+          title="Reset to 100%"
+        >
+          {zoom}%
+        </button>
+        <button
+          type="button"
+          onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
+          disabled={zoom >= ZOOM_MAX}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
       </div>
     </div>
   );

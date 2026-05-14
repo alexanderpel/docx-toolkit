@@ -54,4 +54,5 @@ export type ShellToParentMessage =
   | { type: "save-blob"; base64: string }
   | { type: "mark-seeded" }
   | { type: "navigate-document"; fileId: string }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | { type: "first-paint" };

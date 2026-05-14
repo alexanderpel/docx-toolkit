@@ -37,6 +37,7 @@ body,
 }
 
 .docx-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -58,16 +59,44 @@ body,
   display: none;
 }
 
-.docx-shell-outline {
-  width: 14rem;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
+/* SuperDoc renders a comments rail next to the document by default.
+ * Hide it entirely so the document takes the full canvas. A future
+ * iteration can replace this with a parent-driven slide-out toggle
+ * via postMessage. */
+.docx-shell-canvas .superdoc__comments-layer,
+.docx-shell-canvas .comments-layer,
+.docx-shell-canvas .floating-comments,
+.docx-shell-canvas .sidebar-container,
+.docx-shell-canvas .right-sidebar,
+.docx-shell-canvas .comments-list {
+  display: none !important;
 }
 
-@media (max-width: 768px) {
-  .docx-shell-outline {
-    display: none;
-  }
+/* Center the rendered docx page inside the canvas now that nothing
+ * else occupies the horizontal track. `.superdoc` is the full-width
+ * flex container; its only visible child is `.superdoc__layers` (the
+ * 816px page block). `superdoc/style.css` is imported after our
+ * styles.css so we use !important to win specificity ties. */
+.docx-shell-canvas .superdoc {
+  width: 100% !important;
+  justify-content: center !important;
+}
+
+/* Give each page (paper) a soft drop-shadow + rounded corners so it
+ * reads as a lifted sheet on the dark desk. SuperDoc renders one
+ * `.superdoc__document` per page; without a vertical gap they stack
+ * flush and look "glued" — the gap reveals the canvas (HERO --background)
+ * between sheets. */
+.docx-shell-canvas .superdoc__document {
+  border-radius: 8px !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35),
+              0 1px 2px rgba(0, 0, 0, 0.15) !important;
+  overflow: hidden;
+  margin-bottom: 24px !important;
+}
+
+.docx-shell-canvas .superdoc__document:last-child {
+  margin-bottom: 0 !important;
 }
 
 .docx-shell-error {
@@ -90,6 +119,55 @@ body,
   font-size: 0.875rem;
 }
 
+/* Floating zoom control, bottom-right of the shell. */
+.docx-shell-zoom {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  padding: 2px;
+  z-index: 10;
+  user-select: none;
+}
+
+.docx-shell-zoom button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1;
+  padding: 0.375rem 0.625rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  min-width: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.docx-shell-zoom button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.docx-shell-zoom button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.docx-shell-zoom-reset {
+  min-width: 3rem !important;
+  font-variant-numeric: tabular-nums;
+}
+
 .docx-shell-banner {
   padding: 0.5rem 1rem;
   background: var(--muted);
@@ -107,50 +185,6 @@ body,
 
 .docx-shell-demo .docx-shell {
   flex: 1;
-}
-
-.docx-outline-navigator {
-  padding: 0.5rem;
-}
-
-.docx-outline-navigator.empty {
-  padding: 0.75rem;
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-
-.docx-outline-navigator ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.docx-outline-navigator .outline-entry {
-  width: 100%;
-  text-align: left;
-  font-size: 0.75rem;
-  padding: 0.25rem 0.375rem;
-  border-radius: 0.25rem;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.docx-outline-navigator .outline-entry:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.docx-outline-navigator .outline-numbering {
-  color: var(--muted-foreground);
-  margin-right: 0.25rem;
 }
 
 .docx-shell-home {

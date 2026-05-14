@@ -1,4 +1,4 @@
-import { MutableRefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MutableRefObject, useEffect, useRef, useState } from "react";
 
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -30,50 +30,74 @@ export type UseDocxEditorProviderReturn = {
 // by supplying or omitting the `collab` argument. The local mode is what
 // makes the standalone demo possible — no parent, no backend, just a fresh
 // editor.
+//
+// Provider creation is performed in a useEffect (not during render), so it
+// follows React's purity rules and survives StrictMode's mount → unmount
+// → remount pattern + Vite HMR without leaking WebSocket connections. The
+// effect keys on `documentId` and the `hocuspocusUrl`; token rotation is
+// pushed into the existing provider's config so it never recreates the
+// connection.
 export const useDocxEditorProvider = ({
   documentId,
   collab,
 }: UseDocxEditorProviderProps): UseDocxEditorProviderReturn => {
   const [providerLoaded, setProviderLoaded] = useState(collab === null);
   const [error, setError] = useState<string | null>(null);
-  const [currentDocumentId, setCurrentDocumentId] = useState(documentId);
 
-  const docRef = useRef(new Y.Doc());
+  const docRef = useRef<Y.Doc>(new Y.Doc());
   const providerRef = useRef<HocuspocusProvider | null>(null);
   const indexeddbPersistenceRef = useRef<IndexeddbPersistence | null>(null);
-  const hadInitAuth = useRef(false);
-  const hadInitSync = useRef(false);
   const collabRef = useRef(collab);
   collabRef.current = collab;
 
-  const handleCleanup = () => {
-    indexeddbPersistenceRef.current?.destroy();
-    providerRef.current?.destroy();
-    docRef.current?.destroy();
+  // Recreate the Y.Doc + provider whenever the document or the server URL
+  // changes. Token rotation does NOT trigger a recreate — that lives in
+  // the separate effect below.
+  const hocuspocusUrl = collab?.hocuspocusUrl ?? "";
+  const initialToken = collab?.token ?? "";
+  const isCollab = collab !== null;
 
-    docRef.current = new Y.Doc();
-    providerRef.current = null;
-    indexeddbPersistenceRef.current = null;
-    hadInitAuth.current = false;
-    hadInitSync.current = false;
+  useEffect(() => {
+    // Always start with a fresh Y.Doc per document so stale data from a
+    // previous mount can't bleed in.
+    const yDoc = new Y.Doc();
+    docRef.current = yDoc;
 
-    setProviderLoaded(collabRef.current === null);
-  };
+    if (!isCollab) {
+      // Local-only mode (e.g. ?demo=1). No provider, no IndexedDB, ready
+      // immediately so the editor mounts.
+      setProviderLoaded(true);
+      return () => {
+        yDoc.destroy();
+      };
+    }
 
-  if (collab && !providerRef.current && collab.token) {
+    if (!initialToken) {
+      // Collab requested but no token yet — wait. When the parent posts
+      // refresh-token / the token state updates, this effect will re-run
+      // (dependency below) and we'll wire up.
+      return () => {
+        yDoc.destroy();
+      };
+    }
+
     const roomName = `${DOCX_ROOM_PREFIX}${documentId}`;
-    indexeddbPersistenceRef.current = new IndexeddbPersistence(roomName, docRef.current);
+    const idb = new IndexeddbPersistence(roomName, yDoc);
+    indexeddbPersistenceRef.current = idb;
 
-    providerRef.current = new HocuspocusProvider({
-      url: collab.hocuspocusUrl,
+    let hadInitAuth = false;
+    let hadInitSync = false;
+
+    const provider = new HocuspocusProvider({
+      url: hocuspocusUrl,
       name: roomName,
-      token: collab.token,
-      document: docRef.current,
+      token: initialToken,
+      document: yDoc,
       onAuthenticated: () => {
-        hadInitAuth.current = true;
+        hadInitAuth = true;
       },
       onAuthenticationFailed: (data) => {
-        if (data.reason === "permission-denied" && !hadInitAuth.current) {
+        if (data.reason === "permission-denied" && !hadInitAuth) {
           collabRef.current?.onPermissionDenied?.();
           return;
         }
@@ -81,23 +105,32 @@ export const useDocxEditorProvider = ({
         collabRef.current?.onAuthError?.(data.reason ?? "unknown");
       },
       onSynced: () => {
-        if (!hadInitSync.current) {
-          hadInitSync.current = true;
+        if (!hadInitSync) {
+          hadInitSync = true;
           setProviderLoaded(true);
         }
       },
     });
-  }
+    providerRef.current = provider;
 
-  useLayoutEffect(() => {
-    if (currentDocumentId !== documentId) {
-      handleCleanup();
-      setCurrentDocumentId(documentId);
-      return;
-    }
-    return () => handleCleanup();
-  }, [documentId, currentDocumentId]);
+    return () => {
+      // Order matters: detach indexeddb first so it doesn't try to write
+      // into the doc as the provider tears down.
+      idb.destroy();
+      provider.destroy();
+      yDoc.destroy();
 
+      indexeddbPersistenceRef.current = null;
+      providerRef.current = null;
+      setProviderLoaded(isCollab ? false : true);
+    };
+    // We intentionally do NOT depend on `initialToken` for recreation —
+    // token rotation flows through the configuration update effect below.
+    // Including it here would tear down the WebSocket on every refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, hocuspocusUrl, isCollab]);
+
+  // Token rotation: just update the live configuration. No recreate.
   useEffect(() => {
     if (providerRef.current && collab?.token) {
       providerRef.current.configuration.token = collab.token;

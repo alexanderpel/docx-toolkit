@@ -137,6 +137,7 @@ export const IframeBootstrap = ({ mode }: IframeBootstrapProps) => {
       fetchDownloadMeta={fetchDownloadMeta}
       onAwareness={handleAwareness}
       onError={handleError}
+      onFirstPaint={() => sendToParent({ type: "first-paint" })}
     />
   );
 };
