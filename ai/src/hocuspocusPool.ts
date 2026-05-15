@@ -6,6 +6,7 @@ const HOCUSPOCUS_URL = process.env.HOCUSPOCUS_URL ?? "ws://localhost:2000";
 const AI_SERVICE_TOKEN = process.env.HOCUSPOCUS_AI_SERVICE_SECRET ?? "";
 const POOL_MAX = Number(process.env.AI_HOCUSPOCUS_POOL_MAX ?? 16);
 const POOL_IDLE_MS = Number(process.env.AI_HOCUSPOCUS_POOL_IDLE_MS ?? 300_000);
+const CONNECT_MS = Number(process.env.AI_HOCUSPOCUS_CONNECT_MS ?? 10_000);
 
 const DOCX_ROOM_PREFIX = "docx:";
 
@@ -19,6 +20,7 @@ type Entry = {
 };
 
 const pool = new Map<string, Entry>();
+const pending = new Map<string, Promise<Entry>>();
 
 const setupJSDOM = () => {
   if ((globalThis as any).window) return;
@@ -53,6 +55,72 @@ const scheduleIdleClose = (e: Entry) => {
   }, POOL_IDLE_MS);
 };
 
+const connectEntry = async (documentId: string): Promise<Entry> => {
+  if (pool.size >= POOL_MAX) evictLRU();
+
+  const ydoc = new Y.Doc();
+  const provider = new HocuspocusProvider({
+    url: HOCUSPOCUS_URL,
+    name: `${DOCX_ROOM_PREFIX}${documentId}`,
+    token: AI_SERVICE_TOKEN,
+    document: ydoc,
+    forceSyncInterval: 0,
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        provider.off("synced", onSynced);
+        provider.off("authenticationFailed", onFail);
+        provider.off("connectionError", onConnError);
+        clearTimeout(timer);
+      };
+      const onSynced = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const onFail = (data: { reason?: string }) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error(`hocuspocus auth failed: ${data?.reason ?? "unknown"}`));
+      };
+      const onConnError = (data: { event?: { message?: string }; message?: string }) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const msg = data?.message ?? data?.event?.message ?? "unknown";
+        reject(new Error(`hocuspocus connection error: ${msg}`));
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error(`hocuspocus connect timeout after ${CONNECT_MS}ms`));
+      }, CONNECT_MS);
+      provider.on("synced", onSynced);
+      provider.on("authenticationFailed", onFail);
+      provider.on("connectionError", onConnError);
+    });
+  } catch (err) {
+    provider.destroy();
+    ydoc.destroy();
+    throw err;
+  }
+
+  return {
+    documentId,
+    ydoc,
+    provider,
+    lastUsedAt: Date.now(),
+    idleTimer: null,
+    refCount: 0,
+  };
+};
+
 export const acquireRoom = async (
   documentId: string,
 ): Promise<{ ydoc: Y.Doc; release: () => void }> => {
@@ -60,41 +128,20 @@ export const acquireRoom = async (
 
   let entry = pool.get(documentId);
   if (!entry) {
-    if (pool.size >= POOL_MAX) evictLRU();
-
-    const ydoc = new Y.Doc();
-    const provider = new HocuspocusProvider({
-      url: HOCUSPOCUS_URL,
-      name: `${DOCX_ROOM_PREFIX}${documentId}`,
-      token: AI_SERVICE_TOKEN,
-      document: ydoc,
-      forceSyncInterval: 0,
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const onSynced = () => {
-        provider.off("synced", onSynced);
-        provider.off("authenticationFailed", onFail);
-        resolve();
-      };
-      const onFail = (data: { reason?: string }) => {
-        provider.off("synced", onSynced);
-        provider.off("authenticationFailed", onFail);
-        reject(new Error(`hocuspocus auth failed: ${data?.reason ?? "unknown"}`));
-      };
-      provider.on("synced", onSynced);
-      provider.on("authenticationFailed", onFail);
-    });
-
-    entry = {
-      documentId,
-      ydoc,
-      provider,
-      lastUsedAt: Date.now(),
-      idleTimer: null,
-      refCount: 0,
-    };
-    pool.set(documentId, entry);
+    let inflight = pending.get(documentId);
+    if (!inflight) {
+      inflight = (async () => {
+        try {
+          const built = await connectEntry(documentId);
+          pool.set(documentId, built);
+          return built;
+        } finally {
+          pending.delete(documentId);
+        }
+      })();
+      pending.set(documentId, inflight);
+    }
+    entry = await inflight;
   }
 
   entry.refCount++;
