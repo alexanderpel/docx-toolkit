@@ -10,7 +10,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gen-tools": "tsx scripts/gen-tool-definitions.ts"
   },
   "dependencies": {
     "@hocuspocus/provider": "^3.4.4",
