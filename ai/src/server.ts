@@ -1,5 +1,6 @@
 import express from "express";
-import { drainPool } from "./hocuspocusPool.js";
+import { acquireRoom, drainPool } from "./superdocClientPool.js";
+import { dispatch } from "./dispatch.js";
 
 const PORT = Number(process.env.PORT ?? 5176);
 const AI_SERVICE_SECRET = process.env.AI_SERVICE_SECRET ?? "";
@@ -33,9 +34,32 @@ app.get("/", (_req, res) => {
   });
 });
 
-app.post("/apply-tool", requireSecret, async (_req, res) => {
-  // wired in Task 5
-  res.status(501).json({ error: "not implemented yet" });
+type ApplyToolBody = {
+  documentId?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+};
+
+app.post("/apply-tool", requireSecret, async (req, res) => {
+  const { documentId, tool, args } = (req.body ?? {}) as ApplyToolBody;
+  if (!documentId || !tool) {
+    res.status(400).json({ error: "missing documentId or tool" });
+    return;
+  }
+
+  let release: (() => void) | null = null;
+  try {
+    const { handle, release: rel } = await acquireRoom(documentId);
+    release = rel;
+    const { result, inverseOp } = await dispatch(handle, tool, args ?? {});
+    res.json({ result, inverseOp });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[docx-ai] apply-tool failed:", message);
+    res.status(500).json({ error: "dispatch failed", detail: message.slice(0, 200) });
+  } finally {
+    if (release) release();
+  }
 });
 
 app.listen(PORT, () => {
