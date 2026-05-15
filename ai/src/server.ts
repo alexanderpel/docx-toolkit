@@ -1,4 +1,5 @@
 import express from "express";
+import { drainPool } from "./hocuspocusPool.js";
 
 const PORT = Number(process.env.PORT ?? 5176);
 const AI_SERVICE_SECRET = process.env.AI_SERVICE_SECRET ?? "";
@@ -43,3 +44,6 @@ app.listen(PORT, () => {
     console.log("[docx-ai] WARNING: AI_SERVICE_SECRET not set — unauthenticated");
   }
 });
+
+process.on("SIGTERM", () => { drainPool(); process.exit(0); });
+process.on("SIGINT", () => { drainPool(); process.exit(0); });
