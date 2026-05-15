@@ -6,12 +6,15 @@
   "description": "A monorepo of AGPL-3.0-or-later docx-related programs. Each app under this repo is an independent program; they share only this license and root tooling.",
   "workspaces": [
     "shell",
-    "converter"
+    "converter",
+    "ai"
   ],
   "scripts": {
     "dev:shell": "npm --workspace shell run dev",
     "build:shell": "npm --workspace shell run build",
     "dev:converter": "npm --workspace converter run dev",
-    "build:converter": "npm --workspace converter run build"
+    "build:converter": "npm --workspace converter run build",
+    "dev:ai": "npm --workspace ai run dev",
+    "build:ai": "npm --workspace ai run build"
   }
 }
