@@ -11,8 +11,12 @@ const out: Record<string, unknown> = {};
 for (const provider of providers) {
   // chooseTools is async and returns { tools, meta }; we persist just the
   // provider-native tool array so consumers can paste it straight into their
-  // LLM client calls.
+  // LLM client calls. Guard the shape — a future SDK rename would silently
+  // produce `{ openai: null }` without this.
   const { tools } = await chooseTools({ provider });
+  if (!Array.isArray(tools)) {
+    throw new Error(`chooseTools({ provider: "${provider}" }) did not return a tools array — SDK shape may have changed`);
+  }
   out[provider] = tools;
 }
 
