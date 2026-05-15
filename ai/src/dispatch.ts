@@ -1,53 +1,39 @@
+// Conservative inverse-op posture: most SuperDoc tool calls cannot be safely
+// inverted without capturing the document state BEFORE the call (target
+// content, marks, alignment, etc. — work this thin dispatcher does not do).
+// Returning a wrong inverse silently corrupts the document on undo, so we
+// return null for anything we can't prove is round-trip safe. A future
+// iteration could capture pre-state inline OR delegate to a Y.UndoManager
+// bound to the SuperDoc instance.
 import { dispatchSuperDocTool } from "@superdoc-dev/sdk";
 
-// The SDK's dispatchSuperDocTool wants a BoundDocApi (a SuperDocDocument handle
-// from `client.open()`), not a raw Y.Doc. We pick the parameter type up directly
-// off the SDK so this stays in sync if upstream changes the contract.
 type SuperDocDocumentHandle = Parameters<typeof dispatchSuperDocTool>[0];
 
 export type DispatchResult = {
   result: unknown;
-  // Best-effort reverse op for the undo stack. null when not reversible
-  // (e.g. get_content). The agent runner stores this; on undo it issues
-  // a new POST /apply-tool with these args.
   inverseOp: { tool: string; args: Record<string, unknown> } | null;
 };
 
-type InverseFn = (args: any, result: any) => DispatchResult["inverseOp"];
-
-const REVERSIBLE: Record<string, InverseFn> = {
-  edit: (args) => {
-    if (args?.action === "insert") {
-      return {
-        tool: "edit",
-        args: { action: "delete", target: args.target, length: (args.content ?? "").length },
-      };
-    }
-    if (args?.action === "delete") {
-      return { tool: "edit", args: { action: "insert", target: args.target, content: args.previousContent } };
-    }
-    if (args?.action === "replace") {
-      return { tool: "edit", args: { action: "replace", target: args.target, content: args.previousContent } };
-    }
+const REVERSIBLE: Record<string, (args: any, result: any) => DispatchResult["inverseOp"]> = {
+  // list.indent ↔ list.outdent is a clean structural pair with no
+  // state dependency. Both other list actions (create/insert/merge/
+  // split/set_*/attach/detach/continue_previous) need pre-state to
+  // invert correctly.
+  list: (args) => {
+    if (args?.action === "indent") return { tool: "list", args: { ...args, action: "outdent" } };
+    if (args?.action === "outdent") return { tool: "list", args: { ...args, action: "indent" } };
     return null;
   },
-  format: (args) => ({ tool: "format", args: { ...args, action: invertFormatAction(args.action) } }),
-  create: (_args, result) => {
-    if (result?.id) return { tool: "edit", args: { action: "delete", target: result.id } };
-    return null;
-  },
-  list: (args) => ({ tool: "list", args: { ...args, action: invertListAction(args.action) } }),
-  comment: (args, result) => {
-    if (args?.action === "create" && result?.id) {
-      return { tool: "comment", args: { action: "delete", id: result.id } };
+  // comment.create returns an id; deleting that id is a safe round-trip.
+  // Other comment actions (update/delete/resolve) need the prior comment
+  // body to invert, which we don't have here.
+  comment: (args, result: any) => {
+    if (args?.action === "create" && result && (result as any).id) {
+      return { tool: "comment", args: { action: "delete", id: (result as any).id } };
     }
     return null;
   },
 };
-
-const invertFormatAction = (a: string): string => ({ inline: "inline" } as Record<string, string>)[a] ?? a;
-const invertListAction = (a: string): string =>
-  ({ indent: "outdent", outdent: "indent" } as Record<string, string>)[a] ?? a;
 
 export const dispatch = async (
   documentHandle: SuperDocDocumentHandle,
@@ -55,9 +41,7 @@ export const dispatch = async (
   args: Record<string, unknown>,
 ): Promise<DispatchResult> => {
   const result = await dispatchSuperDocTool(documentHandle, toolName, args);
-
   const inverseFn = REVERSIBLE[toolName];
   const inverseOp = inverseFn ? inverseFn(args, result) : null;
-
   return { result, inverseOp };
 };
