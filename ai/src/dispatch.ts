@@ -35,12 +35,19 @@ const REVERSIBLE: Record<string, (args: any, result: any) => DispatchResult["inv
   },
 };
 
+// Callers (scribe-mono) send tool names without the `superdoc_` prefix
+// (e.g. "get_content", "format") so the wire stays clean. The SDK's
+// internal tool registry keys are full names ("superdoc_get_content"),
+// so we re-attach the prefix here before dispatching.
+const SDK_PREFIX = "superdoc_";
+
 export const dispatch = async (
   documentHandle: SuperDocDocumentHandle,
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<DispatchResult> => {
-  const result = await dispatchSuperDocTool(documentHandle, toolName, args);
+  const sdkToolName = toolName.startsWith(SDK_PREFIX) ? toolName : `${SDK_PREFIX}${toolName}`;
+  const result = await dispatchSuperDocTool(documentHandle, sdkToolName, args);
   const inverseFn = REVERSIBLE[toolName];
   const inverseOp = inverseFn ? inverseFn(args, result) : null;
   return { result, inverseOp };

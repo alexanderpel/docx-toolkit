@@ -6,9 +6,9 @@
   "license": "AGPL-3.0-or-later",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --env-file=.env src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "node --env-file=.env dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "gen-tools": "tsx scripts/gen-tool-definitions.ts"
