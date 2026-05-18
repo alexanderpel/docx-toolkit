@@ -4,9 +4,13 @@ import { dispatch } from "../src/dispatch.js";
 // Mock @superdoc-dev/sdk's dispatchSuperDocTool so we don't need a live
 // SuperDoc client. The dispatcher's job here is just to forward args and
 // wrap the result with an inverseOp.
+//
+// dispatch() re-attaches the `superdoc_` SDK prefix before calling the
+// mock — so we match on `endsWith` rather than equality, otherwise the
+// `comment` case never fires and the inverse-op test sees `null`.
 vi.mock("@superdoc-dev/sdk", async () => ({
   dispatchSuperDocTool: vi.fn(async (_handle: unknown, tool: string, _args: any) => {
-    if (tool === "comment") return { id: "comment-xyz" };
+    if (tool.endsWith("comment")) return { id: "comment-xyz" };
     return { ok: true };
   }),
 }));

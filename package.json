@@ -1,7 +1,7 @@
 {
   "name": "docx-toolkit",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "AGPL-3.0-or-later",
   "description": "A monorepo of AGPL-3.0-or-later docx-related programs. Each app under this repo is an independent program; they share only this license and root tooling.",
   "workspaces": [

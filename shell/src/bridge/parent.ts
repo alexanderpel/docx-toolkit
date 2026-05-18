@@ -1,20 +1,34 @@
 import type { ParentToShellMessage, ShellToParentMessage } from "./types";
 
-// Build-time configured single origin the shell will trust as the parent.
-// In dev this is the Vite-served origin of the embedding page; in prod set it
-// to the deployed parent's origin via VITE_PARENT_ORIGIN. Anything else is
-// dropped.
-const TRUSTED_PARENT_ORIGIN = import.meta.env.VITE_PARENT_ORIGIN ?? "*";
+// VITE_PARENT_ORIGIN baked at build time. Prod builds without it fail closed
+// (postMessage disabled) so auth tokens can't leak to a malicious embedder.
+const RAW_PARENT_ORIGIN = import.meta.env.VITE_PARENT_ORIGIN as string | undefined;
+const IS_DEV = import.meta.env.DEV === true;
+const TRUSTED_PARENT_ORIGIN: string | null =
+  RAW_PARENT_ORIGIN && RAW_PARENT_ORIGIN.trim() !== ""
+    ? RAW_PARENT_ORIGIN
+    : IS_DEV
+    ? "*"
+    : null;
+
+if (!IS_DEV && TRUSTED_PARENT_ORIGIN === null) {
+  console.error(
+    "[shell] VITE_PARENT_ORIGIN is not set in this build. " +
+      "postMessage is disabled until the build is rebuilt with a valid origin.",
+  );
+}
 
 export const sendToParent = (message: ShellToParentMessage) => {
   if (window.parent === window) return;
-  window.parent.postMessage(message, TRUSTED_PARENT_ORIGIN === "*" ? "*" : TRUSTED_PARENT_ORIGIN);
+  if (TRUSTED_PARENT_ORIGIN === null) return;
+  window.parent.postMessage(message, TRUSTED_PARENT_ORIGIN);
 };
 
 export const subscribeToParent = (
   handler: (message: ParentToShellMessage) => void,
 ): (() => void) => {
   const listener = (event: MessageEvent) => {
+    if (TRUSTED_PARENT_ORIGIN === null) return;
     if (TRUSTED_PARENT_ORIGIN !== "*" && event.origin !== TRUSTED_PARENT_ORIGIN) return;
     if (!event.data || typeof event.data !== "object") return;
     if (typeof (event.data as { type?: unknown }).type !== "string") return;

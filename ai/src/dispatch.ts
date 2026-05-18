@@ -1,10 +1,5 @@
-// Conservative inverse-op posture: most SuperDoc tool calls cannot be safely
-// inverted without capturing the document state BEFORE the call (target
-// content, marks, alignment, etc. — work this thin dispatcher does not do).
-// Returning a wrong inverse silently corrupts the document on undo, so we
-// return null for anything we can't prove is round-trip safe. A future
-// iteration could capture pre-state inline OR delegate to a Y.UndoManager
-// bound to the SuperDoc instance.
+// Most SuperDoc tools can't be safely inverted without pre-state; return
+// null for those rather than a guessed inverse (which would corrupt on undo).
 import { dispatchSuperDocTool } from "@superdoc-dev/sdk";
 
 type SuperDocDocumentHandle = Parameters<typeof dispatchSuperDocTool>[0];
@@ -15,18 +10,13 @@ export type DispatchResult = {
 };
 
 const REVERSIBLE: Record<string, (args: any, result: any) => DispatchResult["inverseOp"]> = {
-  // list.indent ↔ list.outdent is a clean structural pair with no
-  // state dependency. Both other list actions (create/insert/merge/
-  // split/set_*/attach/detach/continue_previous) need pre-state to
-  // invert correctly.
+  // Only indent↔outdent are structurally reversible without pre-state.
   list: (args) => {
     if (args?.action === "indent") return { tool: "list", args: { ...args, action: "outdent" } };
     if (args?.action === "outdent") return { tool: "list", args: { ...args, action: "indent" } };
     return null;
   },
-  // comment.create returns an id; deleting that id is a safe round-trip.
-  // Other comment actions (update/delete/resolve) need the prior comment
-  // body to invert, which we don't have here.
+  // comment.create returns an id we can delete — round-trip safe.
   comment: (args, result: any) => {
     if (args?.action === "create" && result && (result as any).id) {
       return { tool: "comment", args: { action: "delete", id: (result as any).id } };
@@ -47,8 +37,31 @@ export const dispatch = async (
   args: Record<string, unknown>,
 ): Promise<DispatchResult> => {
   const sdkToolName = toolName.startsWith(SDK_PREFIX) ? toolName : `${SDK_PREFIX}${toolName}`;
-  const result = await dispatchSuperDocTool(documentHandle, sdkToolName, args);
+  let result: unknown;
+  try {
+    result = await dispatchSuperDocTool(documentHandle, sdkToolName, args);
+  } catch (err) {
+    throw rewriteSdkError(err);
+  }
   const inverseFn = REVERSIBLE[toolName];
   const inverseOp = inverseFn ? inverseFn(args, result) : null;
   return { result, inverseOp };
+};
+
+// Translate SDK errors into action-shaped messages the calling LLM can act
+// on without needing to understand SuperDoc internals. The SDK's text is
+// accurate but uses internal terminology ("query.match", "handle.ref") that
+// the model doesn't know — restating in tool-vocabulary cuts retry loops.
+const rewriteSdkError = (err: unknown): Error => {
+  const original = err instanceof Error ? err.message : String(err);
+  if (/REVISION_MISMATCH|revision-scoped|ephemeral/i.test(original)) {
+    return new Error(
+      "ref_expired: Refs from docx_get_content are revision-scoped and " +
+        "invalidate after ANY mutation (user typing, another tool call, " +
+        "awareness). Call docx_get_content again to obtain fresh refs, " +
+        "then retry. For multi-step edits, prefer docx_mutations to batch " +
+        "ops against a single revision.",
+    );
+  }
+  return err instanceof Error ? err : new Error(original);
 };

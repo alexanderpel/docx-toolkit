@@ -84,6 +84,13 @@ export const DocxShell = ({
   // changes aren't overwritten by re-renders.
   const hasFitToWidthRef = useRef<string | null>(null);
   const firstPaintFiredRef = useRef<string | null>(null);
+  // SuperDoc is created inside an async IIFE. The setZoom effect can run
+  // and skip BEFORE that IIFE finishes assigning superdocRef.current —
+  // so we mirror zoom into a ref and re-apply it right after instance
+  // creation. Without this, the widget shows e.g. 200% but the document
+  // stays at SuperDoc's default 100% until the user nudges zoom again.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   const { provider, doc, isInitialized, isError } = useDocxEditorProvider({
     documentId,
@@ -218,6 +225,16 @@ export const DocxShell = ({
         },
         onEditorUpdate: () => scheduleSave(),
         onReady: () => {
+          // Apply the current zoom HERE — by the time onReady fires,
+          // SuperDoc's reactive store is fully wired and pages are
+          // mounted. Calling setZoom right after `new SuperDoc()` was
+          // too early; the instance accepted the value but didn't
+          // propagate it to the page renderers.
+          try {
+            (superdocRef.current as any)?.setZoom?.(zoomRef.current);
+          } catch (err) {
+            console.error("[DocxShell] onReady setZoom failed:", err);
+          }
           if (needsSeed && mode === "edit") {
             markSeeded();
             scheduleSave();
@@ -236,6 +253,9 @@ export const DocxShell = ({
 
       instance = new SuperDoc(baseConfig as any);
       superdocRef.current = instance;
+      // Zoom is applied in the SuperDoc `onReady` callback above —
+      // calling setZoom here is too early; the value is accepted but
+      // not propagated to the page renderers until onReady fires.
     })();
 
     return () => {

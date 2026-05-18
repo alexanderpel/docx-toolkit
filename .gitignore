@@ -7,3 +7,7 @@ dist-ssr
 .env.local
 .vite
 coverage
+
+# Deploy artifacts — local-only, never to public repo.
+deploy/
+deploy.md
