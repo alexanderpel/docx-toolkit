@@ -1,8 +1,9 @@
 import type { ParentToShellMessage, ShellToParentMessage } from "./types";
 
 // Build-time configured single origin the shell will trust as the parent.
-// In dev this is the Vite-served origin of the embedding page; in prod it is
-// the production hero-app origin. Anything else is dropped.
+// In dev this is the Vite-served origin of the embedding page; in prod set it
+// to the deployed parent's origin via VITE_PARENT_ORIGIN. Anything else is
+// dropped.
 const TRUSTED_PARENT_ORIGIN = import.meta.env.VITE_PARENT_ORIGIN ?? "*";
 
 export const sendToParent = (message: ShellToParentMessage) => {

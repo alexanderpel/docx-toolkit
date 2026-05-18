@@ -76,11 +76,10 @@ export const IframeBootstrap = ({ mode }: IframeBootstrapProps) => {
     const res = await fetch(
       `${init.restBaseUrl}/api/document/docx/${init.documentId}/download-url`,
       {
-        // Host-specific auth header. scribe-mono's script-server reads
-        // the firebase id token from `user-firebase-token`, not from
-        // `Authorization: Bearer`. The header name is part of the host's
-        // public REST contract; the shell carries the value, not the
-        // auth logic.
+        // Host-specific auth header. The embedder's REST API reads the
+        // bearer token from `user-firebase-token` (not `Authorization`).
+        // The header name is part of the host's public contract; the
+        // shell carries the value, not the auth logic.
         headers: { "user-firebase-token": tokenRef.current },
       },
     );

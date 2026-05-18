@@ -35,10 +35,10 @@ const REVERSIBLE: Record<string, (args: any, result: any) => DispatchResult["inv
   },
 };
 
-// Callers (scribe-mono) send tool names without the `superdoc_` prefix
-// (e.g. "get_content", "format") so the wire stays clean. The SDK's
-// internal tool registry keys are full names ("superdoc_get_content"),
-// so we re-attach the prefix here before dispatching.
+// Callers send tool names without the `superdoc_` prefix (e.g.
+// "get_content", "format") so the wire stays clean. The SDK's internal
+// tool registry keys are full names ("superdoc_get_content"), so we
+// re-attach the prefix here before dispatching.
 const SDK_PREFIX = "superdoc_";
 
 export const dispatch = async (

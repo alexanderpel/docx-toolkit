@@ -85,7 +85,7 @@ body,
 /* Give each page (paper) a soft drop-shadow + rounded corners so it
  * reads as a lifted sheet on the dark desk. SuperDoc renders one
  * `.superdoc__document` per page; without a vertical gap they stack
- * flush and look "glued" — the gap reveals the canvas (HERO --background)
+ * flush and look "glued" — the gap reveals the canvas background
  * between sheets. */
 .docx-shell-canvas .superdoc__document {
   border-radius: 8px !important;
