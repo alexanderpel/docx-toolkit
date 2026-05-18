@@ -1,5 +1,5 @@
 import express from "express";
-import { acquireRoom, drainPool } from "./superdocClientPool.js";
+import { acquireRoom } from "./superdocClientPool.js";
 import { dispatch } from "./dispatch.js";
 
 const BODY_LIMIT_MB = Number(process.env.AI_SERVICE_BODY_LIMIT_MB ?? 5);
@@ -65,18 +65,3 @@ export const createServer = (): express.Express => {
 
   return app;
 };
-
-const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
-if (isMain) {
-  const PORT = Number(process.env.PORT ?? 5176);
-  const app = createServer();
-  app.listen(PORT, () => {
-    console.log(`[docx-ai] listening on http://localhost:${PORT}`);
-    if (!process.env.AI_SERVICE_SECRET) {
-      console.log("[docx-ai] WARNING: AI_SERVICE_SECRET not set — unauthenticated");
-    }
-  });
-
-  process.on("SIGTERM", () => { drainPool(); process.exit(0); });
-  process.on("SIGINT", () => { drainPool(); process.exit(0); });
-}
